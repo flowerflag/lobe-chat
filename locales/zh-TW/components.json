@@ -73,6 +73,18 @@
   "GoBack": {
     "back": "返回"
   },
+  "HtmlPreview": {
+    "actions": {
+      "download": "下載",
+      "preview": "預覽"
+    },
+    "iframeTitle": "HTML 預覽",
+    "mode": {
+      "code": "程式碼",
+      "preview": "預覽"
+    },
+    "title": "HTML 預覽"
+  },
   "ImageUpload": {
     "actions": {
       "changeImage": "點擊更換圖片",
@@ -102,6 +114,7 @@
       "reasoning": "該模型支持深度思考",
       "search": "該模型支援聯網搜尋",
       "tokens": "該模型單一會話最多支援 {{tokens}} Tokens",
+      "video": "該模型支援影片識別",
       "vision": "該模型支援視覺辨識"
     },
     "removed": "該模型不在清單中，若取消選取將會自動移除"
