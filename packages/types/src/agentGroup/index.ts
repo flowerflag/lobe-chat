@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
-import { AgentItem } from '../agent';
-import { TaskDetail, UIChatMessage } from '../message';
-import { ChatTopic } from '../topic';
+import type { AgentItem } from '../agent';
+import type { TaskDetail, UIChatMessage } from '../message';
+import type { ChatTopic } from '../topic';
 
 export interface LobeChatGroupMetaConfig {
   avatar?: string;
@@ -162,6 +162,8 @@ export interface ExecAgentParams {
   autoStart?: boolean;
   /** Optional existing message IDs to include in context */
   existingMessageIds?: string[];
+  /** Additional system instructions appended after the agent's own system role */
+  instructions?: string;
   /** The user input/prompt */
   prompt: string;
   /** The agent slug to run (either agentId or slug is required) */

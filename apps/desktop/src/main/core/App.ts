@@ -1,16 +1,28 @@
-import { ElectronIPCEventHandler, ElectronIPCServer } from '@lobechat/electron-server-ipc';
-import { app, nativeTheme, protocol } from 'electron';
-import installExtension, { REACT_DEVELOPER_TOOLS } from 'electron-devtools-installer';
-import { macOS, windows } from 'electron-is';
 import os from 'node:os';
 import { join } from 'node:path';
 
+import type { ElectronIPCEventHandler } from '@lobechat/electron-server-ipc';
+import { ElectronIPCServer } from '@lobechat/electron-server-ipc';
+import { app, nativeTheme, protocol } from 'electron';
+import installExtension, { REACT_DEVELOPER_TOOLS } from 'electron-devtools-installer';
+import { macOS, windows } from 'electron-is';
+
 import { name } from '@/../../package.json';
-import { buildDir } from '@/const/dir';
+import { binDir, buildDir } from '@/const/dir';
 import { isDev } from '@/const/env';
 import { ELECTRON_BE_PROTOCOL_SCHEME } from '@/const/protocol';
-import { IControlModule } from '@/controllers';
-import { IServiceModule } from '@/services';
+import type { IControlModule } from '@/controllers';
+import AuthCtr from '@/controllers/AuthCtr';
+import {
+  astSearchDetectors,
+  browserAutomationDetectors,
+  contentSearchDetectors,
+  fileSearchDetectors,
+  type IToolDetector,
+  runtimeEnvironmentDetectors,
+  type ToolCategory,
+} from '@/modules/toolDetectors';
+import type { IServiceModule } from '@/services';
 import { createLogger } from '@/utils/logger';
 
 import { BrowserManager } from './browser/BrowserManager';
@@ -20,6 +32,7 @@ import { ProtocolManager } from './infrastructure/ProtocolManager';
 import { RendererUrlManager } from './infrastructure/RendererUrlManager';
 import { StaticFileServerManager } from './infrastructure/StaticFileServerManager';
 import { StoreManager } from './infrastructure/StoreManager';
+import { ToolDetectorManager } from './infrastructure/ToolDetectorManager';
 import { UpdaterManager } from './infrastructure/UpdaterManager';
 import { MenuManager } from './ui/MenuManager';
 import { ShortcutManager } from './ui/ShortcutManager';
@@ -46,6 +59,7 @@ export class App {
   staticFileServerManager: StaticFileServerManager;
   protocolManager: ProtocolManager;
   rendererUrlManager: RendererUrlManager;
+  toolDetectorManager: ToolDetectorManager;
   chromeFlags: string[] = ['OverlayScrollbar', 'FluentOverlayScrollbar', 'FluentScrollbar'];
 
   /**
@@ -71,8 +85,16 @@ export class App {
     logger.info(` RAM: ${Math.round(os.totalmem() / 1024 / 1024 / 1024)} GB`);
     logger.info(`PATH: ${app.getAppPath()}`);
     logger.info(` lng: ${app.getLocale()}`);
+    logger.info(` bin: ${binDir}`);
     logger.info('----------------------------------------------');
     logger.info('Starting LobeHub...');
+
+    // Append bundled binaries directory to PATH for fallback tool resolution
+    const pathSep = process.platform === 'win32' ? ';' : ':';
+    process.env.PATH = `${process.env.PATH}${pathSep}${binDir}`;
+
+    // Use native mode (pure Rust/CDP) so agent-browser works without Node.js
+    process.env.AGENT_BROWSER_NATIVE = '1';
 
     logger.debug('Initializing App');
     // Initialize store manager
@@ -119,6 +141,10 @@ export class App {
     this.trayManager = new TrayManager(this);
     this.staticFileServerManager = new StaticFileServerManager(this);
     this.protocolManager = new ProtocolManager(this);
+    this.toolDetectorManager = new ToolDetectorManager(this);
+
+    // Register built-in tool detectors
+    this.registerBuiltinToolDetectors();
 
     // Configure renderer loading strategy (dev server vs static export)
     // should register before app ready
@@ -158,6 +184,33 @@ export class App {
     }
   }
 
+  /**
+   * Register built-in tool detectors for content search and file search
+   */
+  private registerBuiltinToolDetectors() {
+    logger.debug('Registering built-in tool detectors');
+
+    const detectorCategories: Partial<Record<ToolCategory, IToolDetector[]>> = {
+      'runtime-environment': runtimeEnvironmentDetectors,
+      'ast-search': astSearchDetectors,
+      'browser-automation': browserAutomationDetectors,
+      'content-search': contentSearchDetectors,
+      'file-search': fileSearchDetectors,
+    };
+
+    for (const [category, detectors] of Object.entries(detectorCategories)) {
+      if (detectors) {
+        for (const detector of detectors) {
+          this.toolDetectorManager.register(detector, category as ToolCategory);
+        }
+      }
+    }
+
+    logger.info(
+      `Registered ${this.toolDetectorManager.getRegisteredTools().length} tool detectors`,
+    );
+  }
+
   bootstrap = async () => {
     logger.info('Bootstrapping application');
     // make single instance
@@ -186,7 +239,7 @@ export class App {
     // Initialize global shortcuts: globalShortcut must be called after app.whenReady()
     this.shortcutManager.initialize();
 
-    this.browserManager.initializeBrowsers();
+    await this.browserManager.initializeBrowsers();
 
     // Initialize tray manager
     if (process.platform === 'win32') {
@@ -251,6 +304,14 @@ export class App {
   private onActivate = () => {
     logger.debug('Application activated');
     this.browserManager.showMainWindow();
+
+    // Trigger proactive token refresh on app activation (respects 6-hour interval)
+    const authCtr = this.getController(AuthCtr);
+    if (authCtr) {
+      authCtr.onAppActivate().catch((error) => {
+        logger.error('Error during app activation token refresh:', error);
+      });
+    }
   };
 
   /**
